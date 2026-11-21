@@ -1,0 +1,931 @@
+{
+  "info": {
+    "name": "Aeris Predictive Maintenance walkthrough",
+    "description": "Authenticated synthetic Predictive Maintenance walkthrough. Sign in as Technician, retain the cookie jar, use the session CSRF token, demonstrate the complete saved case flow, verify admin denial and sign out. Credentials are runtime-only values or Postman Local Vault references. See docs/postman.md. Existing data is preserved. Includes a separate real HTTP sensor-input walkthrough: equality, exceedance, invalid units, retained unusable readings and persisted incident/event correlation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8766"
+    },
+    {
+      "key": "login_username",
+      "value": ""
+    },
+    {
+      "key": "login_password",
+      "value": ""
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+          "pm.variables.set(\"demo_reference\", \"DEMO-POSTMAN-\" + pm.variables.get(\"request_id\"));",
+          "if (pm.variables.get(\"csrf_token\")) pm.request.headers.upsert({key: \"X-CSRF-Token\", value: pm.variables.get(\"csrf_token\")});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Sign in as Technician",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{login_username}}\",\n  \"password\": \"{{login_password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"Individual login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const session = pm.response.json();",
+              "pm.test(\"Technician account with personal password\", () => { pm.expect(session.user.role).to.eql(\"technician\"); pm.expect(session.user.must_change_password).to.eql(false); });",
+              "pm.variables.set(\"csrf_token\", session.csrf_token);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Check API and PostgreSQL",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/health",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.test(\"PostgreSQL connected\", () => pm.expect(data.database).to.eql(\"connected\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Create a fresh synthetic wind-gust scenario",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/scenarios",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"kind\": \"fault\",\n  \"prepare\": true,\n  \"title\": \"Postman synthetic group walkthrough\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "[\"scenario_id\", \"case_id\", \"expected_version\", \"saved_case\"].forEach(key => pm.collectionVariables.unset(key));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code !== 201) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.collectionVariables.set(\"scenario_id\", data.scenario_id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Read readings and the pending forecast",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/scenarios/{{scenario_id}}",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "if (data.scenario) pm.collectionVariables.set(\"expected_version\", data.scenario.version);",
+              "pm.test(\"96 synthetic readings and pending review\", () => { pm.expect(data.readings.length).to.eql(96); pm.expect(data.forecast.review_status).to.eql(\"Pending\"); });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Verify case is blocked before forecast review",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/scenarios/{{scenario_id}}/case",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{expected_version}}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+              "if (pm.response.code !== 409) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.test(\"Human review required\", () => pm.expect(data.error.code).to.eql(\"REVIEW_REQUIRED\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Review the simulated forecast",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/scenarios/{{scenario_id}}/review",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{expected_version}},\n  \"reviewer\": \"Postman Demo Technician\",\n  \"note\": \"Synthetic demonstration only. One illustrated risk accepted and one rejected.\",\n  \"decisions\": [\n    {\n      \"risk_id\": \"yaw-drive\",\n      \"decision\": \"Accepted\"\n    },\n    {\n      \"risk_id\": \"pitch-actuator\",\n      \"decision\": \"Rejected\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.test(\"Review saved\", () => pm.expect(data.review_status).to.eql(\"Reviewed\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Refresh the scenario version after review",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/scenarios/{{scenario_id}}",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "if (data.scenario) pm.collectionVariables.set(\"expected_version\", data.scenario.version);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Create the predictive maintenance case",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/scenarios/{{scenario_id}}/case",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{expected_version}}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code !== 201) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.collectionVariables.set(\"case_id\", data.case_id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Read the case and its current version",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/cases/{{case_id}}",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "if (data.scenario) pm.collectionVariables.set(\"expected_version\", data.scenario.version);",
+              "pm.test(\"Case open\", () => pm.expect(data.case.status).to.eql(\"Open\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Record a simulated failed verification",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/cases/{{case_id}}/outcomes",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{expected_version}},\n  \"simulated\": true,\n  \"external_reference\": \"{{demo_reference}}\",\n  \"all_work_complete\": true,\n  \"verification\": \"Failed\",\n  \"evidence_reference\": \"DEMO-POSTMAN-EVIDENCE\",\n  \"note\": \"Simulated external outcome only. No real turbine was repaired or verified.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.test(\"Failed verification keeps the case open\", () => pm.expect(data.status).to.eql(\"Open\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Refresh and verify the saved failed outcome",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/cases/{{case_id}}",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "if (data.scenario) pm.collectionVariables.set(\"expected_version\", data.scenario.version);",
+              "pm.test(\"One persisted simulated outcome and open case\", () => { pm.expect(data.outcomes.length).to.eql(1); pm.expect(data.outcomes[0].simulated).to.eql(true); pm.expect(data.case.status).to.eql(\"Open\"); });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Record a simulated successful completion",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/cases/{{case_id}}/outcomes",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{expected_version}},\n  \"simulated\": true,\n  \"external_reference\": \"{{demo_reference}}\",\n  \"all_work_complete\": true,\n  \"verification\": \"Passed\",\n  \"evidence_reference\": \"DEMO-POSTMAN-EVIDENCE\",\n  \"note\": \"Simulated external outcome only. No real turbine was repaired or verified.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.test(\"Complete passed result resolves the case\", () => pm.expect(data.status).to.eql(\"Resolved\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Read the resolved case and all evidence",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/cases/{{case_id}}",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "if (data.scenario) pm.collectionVariables.set(\"expected_version\", data.scenario.version);",
+              "pm.test(\"Saved readings review outcomes and resolution\", () => { pm.expect(data.readings.length).to.eql(96); pm.expect(data.forecast.review_status).to.eql(\"Reviewed\"); pm.expect(data.outcomes.length).to.eql(2); pm.expect(data.case.status).to.eql(\"Resolved\"); pm.expect(data.events.filter(event => event.name === \"Predictive Case Resolved\").length).to.eql(1); });",
+              "pm.collectionVariables.set(\"saved_case\", JSON.stringify(data));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Read the same case again or after a restart",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/cases/{{case_id}}",
+        "description": "Synthetic Predictive Maintenance walkthrough. Run in the numbered order. No data is deleted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "{",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+              "const data = pm.response.json();",
+              "pm.test(\"Complete evidence unchanged\", () => pm.expect(data).to.deep.eql(JSON.parse(pm.collectionVariables.get(\"saved_case\"))));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "External sensor input and rule boundaries",
+      "item": [
+        {
+          "name": "S01 Open an empty sensor window",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"kind\": \"empty\",\n  \"prepare\": false,\n  \"title\": \"Postman external sensor boundary test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code !== 201) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"sensor_scenario_id\", data.scenario_id);",
+                  "pm.collectionVariables.set(\"sensor_version\", data.version);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S02 Send the exact 28.0 m/s boundary",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}/readings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{sensor_version}},\n  \"measured_at\": \"2026-11-17T10:00:00Z\",\n  \"value\": 28.0,\n  \"unit\": \"m/s\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code !== 201) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"sensor_version\", data.version);",
+                  "pm.test(\"Boundary reading is usable\", () => pm.expect(data.quality).to.eql(\"Usable\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S03 Assess the equality boundary",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}/assess",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{sensor_version}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"sensor_version\", data.version);",
+                  "pm.test(\"Equality does not trigger an incident\", () => pm.expect(data.incident_id).to.eql(null));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S04 Verify input and no-fault event are persisted",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.test(\"Exact boundary and assessment fact persisted\", () => { pm.expect(data.readings.length).to.eql(1); pm.expect(data.readings[0].value).to.eql(28); pm.expect(data.incident).to.eql(null); pm.expect(data.events.some(e => e.name === \"Current Faults Assessed\" && e.payload.fault_detected === false)).to.eql(true); });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S05 Open a second independent window",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"kind\": \"empty\",\n  \"prepare\": false,\n  \"title\": \"Postman external sensor boundary test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code !== 201) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"sensor_scenario_id\", data.scenario_id);",
+                  "pm.collectionVariables.set(\"sensor_version\", data.version);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S06 Reject an unsupported sensor unit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}/readings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{sensor_version}},\n  \"measured_at\": \"2026-11-17T10:00:00Z\",\n  \"value\": 28.1,\n  \"unit\": \"km/h\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 422\", () => pm.response.to.have.status(422));",
+                  "if (pm.response.code !== 422) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.test(\"Unsupported unit is rejected\", () => pm.expect(data.error.code).to.eql(\"INVALID_INPUT\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S07 Retain out-of-range input as Invalid",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}/readings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{sensor_version}},\n  \"measured_at\": \"2026-11-17T10:00:00Z\",\n  \"value\": 101,\n  \"unit\": \"m/s\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code !== 201) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"sensor_version\", data.version);",
+                  "pm.test(\"Invalid evidence is labelled\", () => pm.expect(data.quality).to.eql(\"Invalid\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S08 Send 28.1 m/s from the external caller",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}/readings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{sensor_version}},\n  \"measured_at\": \"2026-11-17T10:00:00Z\",\n  \"value\": 28.1,\n  \"unit\": \"m/s\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code !== 201) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"sensor_version\", data.version);",
+                  "pm.test(\"Above-boundary input is usable\", () => pm.expect(data.quality).to.eql(\"Usable\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S09 Assess and create the incident",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}/assess",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"expected_version\": {{sensor_version}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"sensor_version\", data.version);",
+                  "pm.test(\"Above boundary opens an incident\", () => pm.expect(data.incident_id).to.be.a(\"string\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "S10 Verify correlated input rule output and events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/scenarios/{{sensor_scenario_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "{",
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code !== 200) pm.execution.setNextRequest(null);",
+                  "const data = pm.response.json();",
+                  "pm.test(\"Only usable input triggers the saved incident\", () => { pm.expect(data.readings.length).to.eql(2); pm.expect(data.readings.filter(r => r.quality === \"Invalid\").length).to.eql(1); pm.expect(data.incident.peak).to.eql(28.1); pm.expect(data.incident.threshold).to.eql(28); pm.expect(data.incident.evidence.length).to.eql(1); pm.expect(data.events.filter(e => e.name === \"Sensor Readings Recorded\").length).to.eql(3); pm.expect(data.events.filter(e => e.name === \"Fault Incident Opened\").length).to.eql(1); });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "14 Technician cannot list accounts",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/admin/users"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"14 Technician cannot list accounts\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Sign out",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/auth/logout",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"15 Sign out\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Signed-out workspace is denied",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/overview"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"16 Signed-out workspace is denied\", () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

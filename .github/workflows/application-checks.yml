@@ -1,0 +1,76 @@
+name: Application checks
+
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+concurrency:
+  group: application-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Security and repository gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned dependency manager
+        run: python3 -m pip install uv==0.9.27
+      - name: Check repository and helper regressions
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 scripts/check_repository.py
+          git diff-tree --check --root HEAD
+      - name: Block on medium/high SAST findings and known runtime dependency vulnerabilities
+        run: python3 scripts/security_checks.py
+  prototype:
+    name: PostgreSQL tests and Docker smoke test
+    needs: security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COMPOSE_PROJECT_NAME: aeris-ci-${{ github.run_id }}
+      APP_REVISION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare isolated local settings
+        run: python3 scripts/setup_demo.py
+      - name: Check browser script syntax
+        run: node --check app/static/app.js
+      - name: Run domain and API tests with dedicated PostgreSQL
+        run: docker compose --profile test run --rm --build tests
+      - name: Build and deploy the local Docker prototype
+        run: docker compose up -d --build --wait app
+      - name: Create private local validation accounts
+        run: python3 scripts/setup_accounts.py
+      - name: Smoke test running API and dashboard
+        run: python3 scripts/smoke_test.py
+      - name: Run the authenticated Postman business workflow
+        run: python3 scripts/run_postman.py
+      - name: Verify a real private backup and isolated database restore
+        run: python3 scripts/database_backup.py backup-and-verify --project "$COMPOSE_PROJECT_NAME"
+      - name: Validate HTTPS proxy configuration
+        env:
+          AERIS_HOSTNAME: demo.example.com
+        run: >-
+          docker compose -f compose.yaml -f compose.shared.yaml
+          run --rm --no-deps caddy caddy validate
+          --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Verify shared mode requires authentication
+        env:
+          AERIS_HOSTNAME: demo.example.com
+        run: |
+          docker compose -f compose.yaml -f compose.shared.yaml up -d --wait app
+          SMOKE_EXPECT_SHARED=true SMOKE_PUBLIC_ONLY=true python3 scripts/smoke_test.py
+      - name: Show service status on failure
+        if: failure()
+        run: docker compose ps -a
+      - name: Stop this CI run's isolated project
+        if: always()
+        env:
+          AERIS_HOSTNAME: demo.example.com
+        run: docker compose -f compose.yaml -f compose.shared.yaml --profile test down --volumes
